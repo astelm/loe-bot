@@ -4,9 +4,10 @@ compatibility_date = "2026-09-01"
 workers_dev = true
 
 [triggers]
-# Every 10 minutes: check the LOE schedule (POLL_CRON in src/index.ts).
+# Every 10 minutes: check the LOE schedule (POLL_CRON in src/index.ts),
+# and Yasno for Kyiv five minutes later (KYIV_CRON).
 # Every minute: remind subscribers 15 minutes before an outage.
-crons = ["*/10 * * * *", "* * * * *"]
+crons = ["*/10 * * * *", "5-59/10 * * * *", "* * * * *"]
 
 [[d1_databases]]
 binding = "DB"

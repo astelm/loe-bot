@@ -1,10 +1,10 @@
-import { findHouse, parseFact, searchStreets, type DtekFact } from "./dtek.js";
 import { fetchSchedules, GROUPS, toSortable, type DaySchedule, type Interval } from "./loe.js";
 import { diff, fmtInterval, formatDuration, formatList, sameIntervals, totalMinutes } from "./schedule.js";
 import {
-  allSubscribers, getLatest, getPending, getSubscriber, kyivHouses, kyivStreetNames, removeSubscriber, saveLatest,
-  saveSubscriber, setPending, type City, type Pending, type Subscriber,
+  allSubscribers, getLatest, getPending, getSubscriber, removeSubscriber, saveLatest, saveSubscriber, setPending,
+  type City, type Pending, type Subscriber,
 } from "./store.js";
+import { liveYasno, sameHouse, type Option, type Yasno } from "./yasno.js";
 
 export interface Env {
   DB: D1Database;
@@ -14,10 +14,10 @@ export interface Env {
 
 export type FetchSchedules = () => Promise<DaySchedule[]>;
 
-// Free Workers plan allows 50 outgoing requests per run; one goes to LOE.
+// Free Workers plan allows 50 outgoing requests per run; one goes to LOE or Yasno.
 // Messages over this limit are sent on the next run.
 export const SEND_LIMIT = 45;
-// Commands reuse Lviv schedules fetched this recently instead of asking LOE again.
+// Commands reuse schedules fetched this recently instead of asking LOE or Yasno again.
 const FRESH_MS = 10 * 60_000;
 // Most street or house buttons shown at once.
 const MAX_OPTIONS = 8;
@@ -53,7 +53,7 @@ export interface Update {
 // ---------- UI ----------
 
 const CITY_NAMES: Record<City, string> = { lviv: "Львів", kyiv: "Київ" };
-/** LOE calls them groups, DTEK calls them queues. */
+/** LOE calls them groups, Yasno calls them queues. */
 export const groupWord = (city: City) => (city === "kyiv" ? "черга" : "група");
 
 const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -75,8 +75,8 @@ export function groupKeyboard(current?: string) {
   return { inline_keyboard: rows };
 }
 
-const optionsKeyboard = (prefix: string, options: string[]) => ({
-  inline_keyboard: options.map((o, i) => [{ text: o, callback_data: `${prefix}:${i}` }]),
+const optionsKeyboard = (prefix: string, options: Option[]) => ({
+  inline_keyboard: options.map((o, i) => [{ text: o.name, callback_data: `${prefix}:${i}` }]),
 });
 
 function renderDay(day: DaySchedule, group: string, city: City): string {
@@ -95,7 +95,7 @@ function renderDay(day: DaySchedule, group: string, city: City): string {
 export function renderAll(days: DaySchedule[], group: string, city: City = "lviv"): string {
   if (days.length === 0) {
     return city === "kyiv"
-      ? "Графіка ДТЕК поки немає. Він оновлюється кожні 10 хвилин, спробуй трохи згодом: /now"
+      ? "Графіка відключень у Yasno зараз немає. Перевіряю кожні 10 хвилин і напишу, щойно він з'явиться."
       : "Не вдалося отримати графік. Спробую ще раз за кілька хвилин.";
   }
   const parts = days.map((d) => renderDay(d, group, city));
@@ -125,14 +125,14 @@ export function renderChange(day: DaySchedule, group: string, before: Interval[]
 
 // ---------- Commands ----------
 
-interface Ctx { env: Env; chatId: string; now: number; fetchFn: FetchSchedules }
+interface Ctx { env: Env; chatId: string; now: number; fetchFn: FetchSchedules; yasno: Yasno }
 
-/** Lviv: schedules from the last few minutes, or freshly fetched. Kyiv: the last ones GitHub sent. */
-async function currentSchedules({ env, now, fetchFn }: Ctx, city: City): Promise<DaySchedule[]> {
+/** Schedules from the last few minutes, or freshly fetched. */
+async function currentSchedules({ env, now, fetchFn, yasno }: Ctx, city: City): Promise<DaySchedule[]> {
   const latest = await getLatest(env.DB, city);
-  if (city === "kyiv" || (latest && now - latest.at < FRESH_MS)) return latest?.days ?? [];
+  if (latest && now - latest.at < FRESH_MS) return latest.days;
   try {
-    const days = await fetchFn();
+    const days = await (city === "kyiv" ? yasno.schedules() : fetchFn());
     await saveLatest(env.DB, city, { at: now, days }).run();
     return days;
   } catch (err) {
@@ -160,17 +160,23 @@ async function askStreet(ctx: Ctx, text = "Напиши назву вулиці 
   await send(ctx.env, ctx.chatId, text);
 }
 
-async function chooseStreet(ctx: Ctx, street: string) {
+async function chooseStreet(ctx: Ctx, street: Option) {
   await setPending(ctx.env.DB, ctx.chatId, { step: "house", street }).run();
-  await send(ctx.env, ctx.chatId, `📍 ${escape(street)}\nНапиши номер будинку, наприклад: <i>27</i> або <i>27б</i>`);
+  await send(ctx.env, ctx.chatId, `📍 ${escape(street.name)}\nНапиши номер будинку, наприклад: <i>27</i> або <i>27б</i>`);
+}
+
+async function chooseHouse(ctx: Ctx, street: Option, house: Option) {
+  const group = await ctx.yasno.group(street.id, house.id);
+  if (!group) {
+    return void (await send(ctx.env, ctx.chatId, `Yasno не знає черги для ${escape(street.name)}, ${escape(house.name)}. Спробуй інший номер або /city.`));
+  }
+  await subscribe(ctx, "kyiv", group, `${street.name}, ${house.name}`);
 }
 
 /** Text typed during the Kyiv address dialog. */
 async function handleAddressText(ctx: Ctx, pending: Pending, text: string) {
   if (pending.step === "street" || pending.step === "pickStreet") {
-    const names = await kyivStreetNames(ctx.env.DB);
-    if (!names.length) return void (await send(ctx.env, ctx.chatId, "Список адрес Києва ще завантажується. Спробуй трохи згодом."));
-    const found = searchStreets(names, text);
+    const found = await ctx.yasno.streets(text);
     if (!found.length) return void (await send(ctx.env, ctx.chatId, "Не знайшов такої вулиці. Спробуй інакше, без «вул.», наприклад: <i>Хрещатик</i>"));
     if (found.length === 1) return chooseStreet(ctx, found[0]);
     const options = found.slice(0, MAX_OPTIONS);
@@ -178,15 +184,16 @@ async function handleAddressText(ctx: Ctx, pending: Pending, text: string) {
     const more = found.length > MAX_OPTIONS ? `\nЗнайшов ${found.length}, показую перші ${MAX_OPTIONS}. Можеш уточнити назву.` : "";
     return void (await send(ctx.env, ctx.chatId, `Обери вулицю:${more}`, { reply_markup: optionsKeyboard("street", options) }));
   }
-  const houses = await kyivHouses(ctx.env.DB, pending.street);
-  if (!houses) return askStreet(ctx, "Цієї вулиці вже немає в списку ДТЕК. Напиши назву вулиці ще раз:");
-  const match = findHouse(houses, text);
-  if ("exact" in match) return subscribe(ctx, "kyiv", houses[match.exact], `${pending.street}, ${match.exact}`);
-  if (!match.options.length) {
-    return void (await send(ctx.env, ctx.chatId, `Не знайшов будинок «${escape(text)}» на ${escape(pending.street)}. Спробуй ще раз або /city, щоб почати спочатку.`));
+  const { street } = pending;
+  // Search by the number, then match the letter or fraction here: "27 б" finds "27Б".
+  const found = await ctx.yasno.houses(street.id, text.match(/\d+/)?.[0] ?? text);
+  const exact = found.find((h) => sameHouse(h.name, text));
+  if (exact) return chooseHouse(ctx, street, exact);
+  if (!found.length) {
+    return void (await send(ctx.env, ctx.chatId, `Не знайшов будинок «${escape(text)}» на ${escape(street.name)}. Спробуй ще раз або /city, щоб почати спочатку.`));
   }
-  const options = match.options.slice(0, MAX_OPTIONS);
-  await setPending(ctx.env.DB, ctx.chatId, { step: "pickHouse", street: pending.street, options }).run();
+  const options = found.slice(0, MAX_OPTIONS);
+  await setPending(ctx.env.DB, ctx.chatId, { step: "pickHouse", street, options }).run();
   await send(ctx.env, ctx.chatId, "Обери будинок:", { reply_markup: optionsKeyboard("house", options) });
 }
 
@@ -207,7 +214,7 @@ async function handleCallback(ctx: Ctx, query: NonNullable<Update["callback_quer
       reply_markup: groupKeyboard(sub?.city === "lviv" ? sub.group : undefined),
     });
   } else if (kind === "city" && value === "kyiv") {
-    await askStreet(ctx, "Київ (ДТЕК). Черга залежить від адреси.\nНапиши назву вулиці, наприклад: <i>Хрещатик</i>");
+    await askStreet(ctx, "Київ (Yasno). Черга залежить від адреси.\nНапиши назву вулиці, наприклад: <i>Хрещатик</i>");
   } else if (kind === "group" && (GROUPS as readonly string[]).includes(value)) {
     await subscribe(ctx, "lviv", value, null);
   } else if (kind === "street" || kind === "house") {
@@ -216,9 +223,7 @@ async function handleCallback(ctx: Ctx, query: NonNullable<Update["callback_quer
     if (kind === "street" && pending?.step === "pickStreet" && pending.options[i]) {
       await chooseStreet(ctx, pending.options[i]);
     } else if (kind === "house" && pending?.step === "pickHouse" && pending.options[i]) {
-      const houses = await kyivHouses(ctx.env.DB, pending.street);
-      const house = pending.options[i];
-      if (houses?.[house]) await subscribe(ctx, "kyiv", houses[house], `${pending.street}, ${house}`);
+      await chooseHouse(ctx, pending.street, pending.options[i]);
     }
   }
 }
@@ -226,11 +231,11 @@ async function handleCallback(ctx: Ctx, query: NonNullable<Update["callback_quer
 export async function handleUpdate(
   env: Env,
   update: Update,
-  { now = Date.now(), fetchFn = fetchSchedules as FetchSchedules } = {},
+  { now = Date.now(), fetchFn = fetchSchedules as FetchSchedules, yasno = liveYasno } = {},
 ): Promise<void> {
   const chat = update.callback_query?.message?.chat ?? update.message?.chat;
   if (!chat) return;
-  const ctx: Ctx = { env, chatId: String(chat.id), now, fetchFn };
+  const ctx: Ctx = { env, chatId: String(chat.id), now, fetchFn, yasno };
   if (update.callback_query) return handleCallback(ctx, update.callback_query);
 
   const text = update.message?.text?.trim();
@@ -324,22 +329,16 @@ export async function notifyChanges(env: Env, city: City, days: DaySchedule[], n
   return `${city} ${dates}: sent ${sent}` + (postponed ? `, ${postponed} left for the next run` : "");
 }
 
-/** Called every 10 minutes: fetches the Lviv schedule and sends changes. */
+/** Called every 10 minutes for each city: fetches its schedule and sends changes. */
 export async function runPoll(
   env: Env,
-  { now = Date.now(), fetchFn = fetchSchedules as FetchSchedules } = {},
+  { city = "lviv" as City, now = Date.now(), fetchFn = fetchSchedules as FetchSchedules, yasno = liveYasno } = {},
 ): Promise<string> {
   let days: DaySchedule[];
   try {
-    days = await fetchFn();
+    days = await (city === "kyiv" ? yasno.schedules() : fetchFn());
   } catch (err) {
-    return `fetch failed: ${(err as Error).message}`; // subscribers keep the previous state
+    return `${city} fetch failed: ${(err as Error).message}`; // subscribers keep the previous state
   }
-  return notifyChanges(env, "lviv", days, now);
-}
-
-/** Kyiv schedule posted by the GitHub job: `DisconSchedule.fact` from the DTEK page. */
-export async function ingestKyiv(env: Env, body: { fact?: DtekFact; updateTimestamp?: string }, now = Date.now()) {
-  if (!body.fact?.data) throw new Error("no fact in body");
-  return notifyChanges(env, "kyiv", parseFact(body.fact, body.updateTimestamp ?? body.fact.update ?? null), now);
+  return notifyChanges(env, city, days, now);
 }

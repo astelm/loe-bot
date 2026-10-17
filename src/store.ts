@@ -1,4 +1,5 @@
 import type { DaySchedule, Interval } from "./loe.js";
+import type { Option } from "./yasno.js";
 
 export type City = "lviv" | "kyiv";
 export const CITIES: City[] = ["lviv", "kyiv"];
@@ -22,22 +23,22 @@ export interface Latest {
 /** Where a chat is in the Kyiv address dialog. */
 export type Pending =
   | { step: "street" }
-  | { step: "pickStreet"; options: string[] }
-  | { step: "house"; street: string }
-  | { step: "pickHouse"; street: string; options: string[] };
+  | { step: "pickStreet"; options: Option[] }
+  | { step: "house"; street: Option }
+  | { step: "pickHouse"; street: Option; options: Option[] };
 
 // One statement per line: /setup runs it with DB.exec.
 export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS subscribers (chat_id TEXT PRIMARY KEY, grp TEXT NOT NULL, last_sent TEXT NOT NULL DEFAULT '{}', city TEXT NOT NULL DEFAULT 'lviv', address TEXT);
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT);
-CREATE TABLE IF NOT EXISTS kyiv_streets (street TEXT PRIMARY KEY, houses TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pending (chat_id TEXT PRIMARY KEY, data TEXT NOT NULL);
 `;
 
-// Columns added after the first release. /setup runs each and ignores "duplicate column".
+// Changes after the first release. /setup runs each and ignores "duplicate column".
 export const MIGRATIONS = [
   "ALTER TABLE subscribers ADD COLUMN city TEXT NOT NULL DEFAULT 'lviv'",
   "ALTER TABLE subscribers ADD COLUMN address TEXT",
+  "DROP TABLE IF EXISTS kyiv_streets", // DTEK addresses, before Kyiv moved to Yasno
 ];
 
 interface Row {
@@ -103,21 +104,4 @@ export function setPending(db: D1Database, chatId: string, pending: Pending | nu
     ? db.prepare("INSERT INTO pending (chat_id, data) VALUES (?, ?) ON CONFLICT(chat_id) DO UPDATE SET data = excluded.data")
       .bind(chatId, JSON.stringify(pending))
     : db.prepare("DELETE FROM pending WHERE chat_id = ?").bind(chatId);
-}
-
-export async function kyivStreetNames(db: D1Database): Promise<string[]> {
-  const { results } = await db.prepare("SELECT street FROM kyiv_streets").all<{ street: string }>();
-  return results.map((r) => r.street);
-}
-
-/** House number -> group, as DTEK lists them for the street. */
-export async function kyivHouses(db: D1Database, street: string): Promise<Record<string, string> | null> {
-  const row = await db.prepare("SELECT houses FROM kyiv_streets WHERE street = ?").bind(street).first<{ houses: string }>();
-  return row ? JSON.parse(row.houses) : null;
-}
-
-export function saveKyivStreet(db: D1Database, street: string, houses: Record<string, string>): D1PreparedStatement {
-  return db
-    .prepare("INSERT INTO kyiv_streets (street, houses) VALUES (?, ?) ON CONFLICT(street) DO UPDATE SET houses = excluded.houses")
-    .bind(street, JSON.stringify(houses));
 }

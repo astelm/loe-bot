@@ -87,6 +87,9 @@ export async function fetchSchedules(): Promise<DaySchedule[]> {
       if (s) byDate.set(s.date, s);
     }
   }
+  // LOE always shows at least today's schedule. An answer without one is a glitch on their side
+  // (it happened on 17.10.2026); treat it as a failed fetch so the last good schedule is kept.
+  if (byDate.size === 0) throw new Error(`no schedule in LOE response (${JSON.stringify(data).length} bytes)`);
   return [...byDate.values()].sort((a, b) => toSortable(a.date).localeCompare(toSortable(b.date)));
 }
 

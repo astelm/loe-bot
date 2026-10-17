@@ -1,9 +1,11 @@
-import { handleUpdate, ingestKyiv, runPoll, telegram, type Env, type Update } from "./bot.js";
+import { handleUpdate, runPoll, telegram, type Env, type Update } from "./bot.js";
 import { runReminders } from "./reminders.js";
-import { MIGRATIONS, saveKyivStreet, SCHEMA } from "./store.js";
+import { MIGRATIONS, SCHEMA } from "./store.js";
 
-// Must match the first cron in wrangler.toml.
+// Must match the first two crons in wrangler.toml. Separate runs, so each city
+// gets its own budget of outgoing requests.
 export const POLL_CRON = "*/10 * * * *";
+export const KYIV_CRON = "5-59/10 * * * *";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -24,20 +26,6 @@ export default {
     }
 
     const authorized = request.headers.get("Authorization") === `Bearer ${env.WEBHOOK_SECRET}`;
-
-    // Kyiv data from the GitHub jobs (scripts/dtek.py), since DTEK's site blocks Cloudflare.
-    if (request.method === "POST" && url.pathname === "/kyiv/schedule") {
-      if (!authorized) return new Response("forbidden", { status: 403 });
-      return Response.json({ ok: true, result: await ingestKyiv(env, await request.json()) });
-    }
-    if (request.method === "POST" && url.pathname === "/kyiv/streets") {
-      if (!authorized) return new Response("forbidden", { status: 403 });
-      // {streets: {name: {house: group}}}, a few dozen streets per request.
-      const { streets } = (await request.json()) as { streets: Record<string, Record<string, string>> };
-      const entries = Object.entries(streets ?? {});
-      if (entries.length) await env.DB.batch(entries.map(([name, houses]) => saveKyivStreet(env.DB, name, houses)));
-      return Response.json({ ok: true, saved: entries.length });
-    }
 
     // Called by the deploy workflow: creates tables, points Telegram at this worker.
     if (request.method === "POST" && url.pathname === "/setup") {
@@ -67,8 +55,11 @@ export default {
 
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (event.cron === POLL_CRON) {
-      // Every 10 minutes: check the Lviv schedule and send changes. Kyiv comes from GitHub.
+      // Every 10 minutes: check the Lviv schedule and send changes.
       ctx.waitUntil(runPoll(env).then((r) => console.log(`poll: ${r}`)));
+    } else if (event.cron === KYIV_CRON) {
+      // The same for Kyiv, five minutes later.
+      ctx.waitUntil(runPoll(env, { city: "kyiv" }).then((r) => console.log(`poll: ${r}`)));
     } else {
       // Every minute: remind about outages starting soon.
       ctx.waitUntil(runReminders(env).then((r) => console.log(`reminders: ${r}`)));

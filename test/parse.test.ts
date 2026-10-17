@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseSchedule } from "../src/loe.js";
+import { fetchSchedules, parseSchedule } from "../src/loe.js";
 import { diff, totalMinutes, formatDuration } from "../src/schedule.js";
 
 const sample = `<p><b>Графік погодинних відключень на 17.10.2026</b></p>
@@ -31,4 +31,14 @@ test("hours and diff", () => {
   const d = diff([{ from: "20:00", to: "22:00" }], [{ from: "20:00", to: "22:00" }, { from: "23:00", to: "00:00" }]);
   assert.deepEqual(d.added, [{ from: "23:00", to: "00:00" }]);
   assert.equal(d.afterMinutes - d.beforeMinutes, 60);
+});
+
+test("an LOE answer without any schedule counts as a failed fetch", async () => {
+  const saved = globalThis.fetch;
+  globalThis.fetch = (async () => Response.json({ "hydra:member": [{ menuItems: [{ name: "Today", rawHtml: "" }] }] })) as typeof fetch;
+  try {
+    await assert.rejects(fetchSchedules(), /no schedule in LOE response/);
+  } finally {
+    globalThis.fetch = saved;
+  }
 });

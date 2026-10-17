@@ -1,23 +1,13 @@
 import { TelegramError, send, SEND_LIMIT, type Env } from "./bot.js";
 import type { DaySchedule } from "./loe.js";
-import { formatDuration, toMinutes } from "./schedule.js";
+import { formatDuration, isQuietTime, kyivMinutes, toMinutes } from "./schedule.js";
 import { allSubscribers, getLatest, removeSubscriber } from "./store.js";
 
 // How long before an outage subscribers get a heads-up.
 export const LEAD_MINUTES = 15;
-const TIMEZONE = "Europe/Kyiv";
-
-/** Kyiv wall-clock time as minutes since the epoch, so it compares with schedule times directly. */
-export function kyivMinutes(date: Date): number {
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", {
-      timeZone: TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-    }).formatToParts(date).map((x) => [x.type, x.value]),
-  );
-  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) / 60_000;
-}
-
+// A "power is back" message is still sent this long after the end, e.g. when a
+// shorter outage is published after its new end time.
+const POWER_ON_CATCH_UP = 60;
 function dayStart(date: string): number {
   const [d, m, y] = date.split(".").map(Number);
   return Date.UTC(y, m - 1, d) / 60_000;
@@ -71,40 +61,77 @@ export function renderReminder(o: Outage, now: number): string {
   ].join("\n");
 }
 
+export function renderPowerOn(o: Outage, next: Outage | undefined): string {
+  return [
+    `💡 За графіком світло вже є — група <b>${o.group}</b>`,
+    `Відключення ${clock(o.start)}–${clock(o.end)} закінчилося.`,
+    next
+      ? `Наступне: 🔴 ${clock(next.start)}–${clock(next.end)} (${formatDuration(next.end - next.start)})`
+      : "Більше відключень у графіку поки немає.",
+  ].join("\n");
+}
+
+const setState = (env: Env, key: string, value: string) =>
+  env.DB.prepare("INSERT INTO state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+    .bind(key, value);
+
+async function getState(env: Env, key: string): Promise<string | null> {
+  const row = await env.DB.prepare("SELECT value FROM state WHERE key = ?").bind(key).first<{ value: string }>();
+  return row?.value ?? null;
+}
+
 /**
- * Called every minute: messages subscribers whose outage starts in LEAD_MINUTES.
- * Remembers how far ahead it has already looked, so a skipped minute isn't missed
- * and nobody is reminded twice.
+ * Called every minute, using the newest schedule each time:
+ * - ⏰ LEAD_MINUTES before an outage starts. Remembers how far ahead it has looked,
+ *   so a skipped minute isn't missed and nobody is reminded twice. If the start
+ *   moves later, there's a reminder for the new time too.
+ * - 💡 when an outage ends. Remembered per group and end time, so if the end moves
+ *   (extended, or cut short and published late) the message follows the new end.
  */
 export async function runReminders(env: Env, { now = new Date() } = {}): Promise<string> {
   const nowMin = kyivMinutes(now);
   const until = nowMin + LEAD_MINUTES;
-  const row = await env.DB.prepare("SELECT value FROM state WHERE key = 'reminded_until'").first<{ value: string }>();
+  const stored = await getState(env, "reminded_until");
   // Outages already under way get no reminder.
-  const from = Math.max(row ? Number(row.value) : until - 1, nowMin);
-  const writes = [
-    env.DB.prepare("INSERT INTO state (key, value) VALUES ('reminded_until', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-      .bind(String(until)),
-  ];
+  const from = Math.max(stored ? Number(stored) : until - 1, nowMin);
 
-  const latest = await getLatest(env.DB);
-  const due = outages(latest?.days ?? []).filter((o) => o.start > from && o.start <= until);
+  const all = outages((await getLatest(env.DB))?.days ?? []);
+  const messages: { group: string; text: string }[] = [];
+  for (const o of all.filter((o) => o.start > from && o.start <= until)) {
+    messages.push({ group: o.group, text: renderReminder(o, nowMin) });
+  }
+
+  const sentState = await getState(env, "power_on_sent");
+  const sentEnds: string[] = JSON.parse(sentState ?? "[]");
+  const ended = all.filter((o) => o.end <= nowMin && o.end > nowMin - POWER_ON_CATCH_UP && !sentEnds.includes(`${o.group}@${o.end}`));
+  // The very first run only takes note of outages that already ended.
+  for (const o of sentState === null ? [] : ended) {
+    const next = all.find((n) => n.group === o.group && n.start > o.end);
+    messages.push({ group: o.group, text: renderPowerOn(o, next) });
+  }
+  const keepEnds = [...sentEnds, ...ended.map((o) => `${o.group}@${o.end}`)]
+    .filter((k) => Number(k.split("@")[1]) > nowMin - 1440);
+
+  const writes = [setState(env, "reminded_until", String(until)), setState(env, "power_on_sent", JSON.stringify(keepEnds))];
   let sent = 0;
   let skipped = 0;
-  if (due.length) {
+  if (messages.length) {
+    const quiet = isQuietTime(now);
     const subs = await allSubscribers(env.DB);
-    for (const o of due) {
-      for (const sub of subs.filter((s) => s.group === o.group)) {
+    const gone = new Set<string>();
+    for (const m of messages) {
+      for (const sub of subs.filter((s) => s.group === m.group && !gone.has(s.chatId))) {
         if (sent >= SEND_LIMIT) {
           skipped++;
           continue;
         }
         sent++;
         try {
-          await send(env, sub.chatId, renderReminder(o, nowMin));
+          await send(env, sub.chatId, m.text, { disable_notification: quiet });
         } catch (err) {
           console.log(`reminder ${sub.chatId}: ${(err as Error).message}`);
           if (err instanceof TelegramError && (err.status === 403 || err.status === 400)) {
+            gone.add(sub.chatId);
             writes.push(removeSubscriber(env.DB, sub.chatId));
           }
         }

@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { handleUpdate } from "../src/bot.js";
-import { kyivMinutes, outages, runReminders } from "../src/reminders.js";
+import { outages, runReminders } from "../src/reminders.js";
+import { kyivMinutes } from "../src/schedule.js";
 import { saveLatest } from "../src/store.js";
 import { day, env, fakeTelegram, press } from "./helpers.js";
 
@@ -67,4 +68,56 @@ test("a skipped minute is caught up, an outage already started is not", async ()
   calls = fakeTelegram();
   await runReminders(late, { now: kyiv("20:30") }); // down for an hour and a half
   assert.equal(calls.length, 0);
+});
+
+test("power-on message at the end, with the next outage", async () => {
+  const e = await setup();
+  await saveLatest(e.DB, { at: Date.now(), days: [day("17.10.2026", { "1.1": [{ from: "20:00", to: "22:00" }, { from: "23:00", to: "24:00" }] })] }).run();
+  fakeTelegram();
+  await runReminders(e, { now: kyiv("21:59") });
+  let calls = fakeTelegram();
+  await runReminders(e, { now: kyiv("22:00") });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].text, /світло вже є/);
+  assert.match(calls[0].text, /20:00–22:00 закінчилося/);
+  assert.match(calls[0].text, /Наступне: 🔴 23:00–00:00/);
+  calls = fakeTelegram();
+  await runReminders(e, { now: kyiv("22:01") });
+  assert.equal(calls.length, 0);
+});
+
+test("power-on follows an updated end time", async () => {
+  const e = await setup();
+  const extended = [day("17.10.2026", { "1.1": [{ from: "20:00", to: "23:00" }] })];
+  await saveLatest(e.DB, { at: Date.now(), days: extended }).run();
+  let calls = fakeTelegram();
+  await runReminders(e, { now: kyiv("22:00") }); // old end: nothing
+  assert.equal(calls.length, 0);
+  await runReminders(e, { now: kyiv("23:00") });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].text, /20:00–23:00/);
+
+  // Cut short, but published after the new end.
+  const e2 = await setup();
+  fakeTelegram();
+  await runReminders(e2, { now: kyiv("21:05") });
+  await saveLatest(e2.DB, { at: Date.now(), days: [day("17.10.2026", { "1.1": [{ from: "20:00", to: "21:00" }] })] }).run();
+  calls = fakeTelegram();
+  await runReminders(e2, { now: kyiv("21:06") });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].text, /20:00–21:00 закінчилося/);
+});
+
+test("messages between 00:00 and 06:00 arrive without sound", async () => {
+  const e = env();
+  const days = [day("18.10.2026", { "1.1": [{ from: "02:00", to: "04:00" }, { from: "08:00", to: "10:00" }] })];
+  fakeTelegram();
+  await handleUpdate(e, press(1, "group:1.1"), { fetchFn: async () => days });
+  await saveLatest(e.DB, { at: Date.now(), days }).run();
+  let calls = fakeTelegram();
+  await runReminders(e, { now: kyiv("01:45", "2026-10-18") });
+  assert.equal(calls[0].disable_notification, true);
+  calls = fakeTelegram();
+  await runReminders(e, { now: kyiv("07:45", "2026-10-18") });
+  assert.equal(calls[0].disable_notification, false);
 });

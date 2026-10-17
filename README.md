@@ -7,6 +7,9 @@ subscriber about **their group**:
 - 🆕 a new day's schedule (e.g. tomorrow's is published)
 - ⚠️ a change: what was added or cancelled, hours without power before → after, and the difference
 - ⏰ a reminder 15 minutes before each outage
+- 💡 a message when power is back, at the end time from the newest schedule
+
+Between 00:00 and 06:00 Kyiv time these messages arrive without sound (`QUIET_HOURS` in `src/schedule.ts`).
 
 It runs on Cloudflare Workers' free plan, so commands are answered instantly.
 
@@ -26,6 +29,9 @@ It runs on Cloudflare Workers' free plan, so commands are answered instantly.
 - Another schedule runs every minute and reminds subscribers 15 minutes before an outage in their
   group (`LEAD_MINUTES` in `src/reminders.ts`). Back-to-back intervals, also across midnight, count
   as one outage. If a run is missed, the next one catches up; outages already under way get no reminder.
+  The same run sends 💡 when an outage ends. It's remembered per group and end time, so if LOE
+  extends or shortens an outage the message goes out at the new end (up to an hour late if the
+  shorter schedule is published after the fact).
 - Subscribers, what each was last told, and the latest schedule are kept in a Cloudflare D1 database.
 - The feed is unofficial. If LOE changes the wording or the API shape, adjust `parseSchedule` in `src/loe.ts`.
 

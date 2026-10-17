@@ -1,4 +1,4 @@
-name: Debug Lviv
+name: Debug
 on:
   push:
     branches: [debug-lviv]
@@ -10,14 +10,18 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm ci
-      - name: Lviv state and a poll run
+      - name: Yasno endpoints in its web app
+        run: bash probe/find.sh
+      - name: Yasno from GitHub
         run: |
-          id=$(npx wrangler d1 list --json | jq -r '.[] | select(.name == "loe-bot") | (.uuid // .id)')
-          sed -i "s/REPLACED_BY_DEPLOY_WORKFLOW/$id/" wrangler.toml
-          npx wrangler d1 execute loe-bot --remote --json --command "SELECT key, substr(value, 1, 300) v FROM state WHERE key = 'latest'" | jq -c '.[0].results'
-          timeout 660 npx wrangler tail loe-bot --format json 2>/dev/null | jq -c --unbuffered 'select(.event.cron == "*/10 * * * *") | {cron: .event.cron, outcome, logs: [.logs[].message], ex: .exceptions, cpu: .cpuTime, wall: .wallTime}' | head -1 || true
-          npx wrangler d1 execute loe-bot --remote --json --command "SELECT key, substr(value, 1, 300) v FROM state WHERE key = 'latest'" | jq -c '.[0].results'
+          B=https://app.yasno.ua/api/blackout-service/public/shutdowns
+          curl -sS -m 30 "$B/regions/25/dsos/902/planned-outages" | head -c 1500; echo
+          curl -sS -m 30 "$B/addresses/v2/regions" | head -c 800; echo
+      - name: Yasno from a Cloudflare Worker
+        run: |
+          cd probe
+          npx -y wrangler@4 deploy | tee deploy.log
+          url=$(grep -o 'https://[^ ]*workers\.dev' deploy.log | head -1)
+          sleep 5
+          curl -sS --retry 3 --retry-all-errors "$url" | jq . | head -c 8000; echo
+          npx -y wrangler@4 delete --force || true

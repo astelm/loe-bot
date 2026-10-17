@@ -338,7 +338,7 @@ export async function runPoll(
   return notifyChanges(env, "lviv", days, now);
 }
 
-/** Kyiv schedule posted by the GitHub job: DTEK's getHomeNum answer, which carries the newest `fact`. */
+/** Kyiv schedule posted by the GitHub job: `DisconSchedule.fact` from the DTEK page. */
 export async function ingestKyiv(env: Env, body: { fact?: DtekFact; updateTimestamp?: string }, now = Date.now()) {
   if (!body.fact?.data) throw new Error("no fact in body");
   return notifyChanges(env, "kyiv", parseFact(body.fact, body.updateTimestamp ?? body.fact.update ?? null), now);

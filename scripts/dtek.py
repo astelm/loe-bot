@@ -66,16 +66,10 @@ def post(path, payload):
 
 def schedule():
     dtek = Dtek()
-    streets = dtek.page_value("streets")
     fact = dtek.page_value("fact")
-    # The page can be cached; getHomeNum answers with the newer schedule when there is one.
-    body = dtek.street("вул. Хрещатик" if "вул. Хрещатик" in streets else streets[0], fact.get("update") or "01.01.2000 00:00")
-    if body.get("fact", {}).get("data"):
-        fact, updated = body["fact"], body.get("updateTimestamp")
-    else:
-        updated = fact.get("update")
-    print(f"schedule as of {updated}: {list(fact['data'])}")
-    print(post("/kyiv/schedule", {"fact": fact, "updateTimestamp": updated}))
+    # `update` is when DTEK last changed the schedule. (getHomeNum's updateTimestamp is just the time of the request.)
+    print(f"schedule as of {fact.get('update')}: {list(fact['data'])}")
+    print(post("/kyiv/schedule", {"fact": fact, "updateTimestamp": fact.get("update")}))
 
 
 def streets():

@@ -70,11 +70,3 @@ export function kyivMinutes(date: Date): number {
   );
   return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) / 60_000;
 }
-
-// Messages the bot sends on its own arrive without sound between these hours (Kyiv time): [from, to).
-export const QUIET_HOURS = [0, 6];
-
-export function isQuietTime(date: Date): boolean {
-  const hour = Math.floor((kyivMinutes(date) % 1440) / 60);
-  return hour >= QUIET_HOURS[0] && hour < QUIET_HOURS[1];
-}

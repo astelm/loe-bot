@@ -107,17 +107,3 @@ test("power-on follows an updated end time", async () => {
   assert.equal(calls.length, 1);
   assert.match(calls[0].text, /20:00–21:00 закінчилося/);
 });
-
-test("messages between 00:00 and 06:00 arrive without sound", async () => {
-  const e = env();
-  const days = [day("18.10.2026", { "1.1": [{ from: "02:00", to: "04:00" }, { from: "08:00", to: "10:00" }] })];
-  fakeTelegram();
-  await handleUpdate(e, press(1, "group:1.1"), { fetchFn: async () => days });
-  await saveLatest(e.DB, { at: Date.now(), days }).run();
-  let calls = fakeTelegram();
-  await runReminders(e, { now: kyiv("01:45", "2026-10-18") });
-  assert.equal(calls[0].disable_notification, true);
-  calls = fakeTelegram();
-  await runReminders(e, { now: kyiv("07:45", "2026-10-18") });
-  assert.equal(calls[0].disable_notification, false);
-});

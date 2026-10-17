@@ -1,6 +1,6 @@
 import { TelegramError, send, SEND_LIMIT, type Env } from "./bot.js";
 import type { DaySchedule } from "./loe.js";
-import { formatDuration, isQuietTime, kyivMinutes, toMinutes } from "./schedule.js";
+import { formatDuration, kyivMinutes, toMinutes } from "./schedule.js";
 import { allSubscribers, getLatest, removeSubscriber } from "./store.js";
 
 // How long before an outage subscribers get a heads-up.
@@ -116,7 +116,6 @@ export async function runReminders(env: Env, { now = new Date() } = {}): Promise
   let sent = 0;
   let skipped = 0;
   if (messages.length) {
-    const quiet = isQuietTime(now);
     const subs = await allSubscribers(env.DB);
     const gone = new Set<string>();
     for (const m of messages) {
@@ -127,7 +126,7 @@ export async function runReminders(env: Env, { now = new Date() } = {}): Promise
         }
         sent++;
         try {
-          await send(env, sub.chatId, m.text, { disable_notification: quiet });
+          await send(env, sub.chatId, m.text);
         } catch (err) {
           console.log(`reminder ${sub.chatId}: ${(err as Error).message}`);
           if (err instanceof TelegramError && (err.status === 403 || err.status === 400)) {

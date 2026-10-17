@@ -9,8 +9,6 @@ subscriber about **their group**:
 - ⏰ a reminder 15 minutes before each outage
 - 💡 a message when power is back, at the end time from the newest schedule
 
-Between 00:00 and 06:00 Kyiv time these messages arrive without sound (`QUIET_HOURS` in `src/schedule.ts`).
-
 It runs on Cloudflare Workers' free plan, so commands are answered instantly.
 
 ## Bot commands

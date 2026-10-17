@@ -1,5 +1,5 @@
 import { fetchSchedules, GROUPS, toSortable, type DaySchedule, type Interval } from "./loe.js";
-import { diff, fmtInterval, formatDuration, formatList, isQuietTime, sameIntervals, totalMinutes } from "./schedule.js";
+import { diff, fmtInterval, formatDuration, formatList, sameIntervals, totalMinutes } from "./schedule.js";
 import {
   allSubscribers, getLatest, getSubscriber, removeSubscriber, saveLatest, saveSubscriber, type Subscriber,
 } from "./store.js";
@@ -208,7 +208,7 @@ export async function runPoll(
       }
       sent++;
       try {
-        await send(env, sub.chatId, renderChange(day, sub.group, before), { disable_notification: isQuietTime(new Date(now)) });
+        await send(env, sub.chatId, renderChange(day, sub.group, before));
         sub.lastSent[day.date] = current;
         changed = true;
       } catch (err) {

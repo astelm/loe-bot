@@ -1,7 +1,7 @@
-import { TelegramError, send, SEND_LIMIT, type Env } from "./bot.js";
+import { groupWord, TelegramError, send, SEND_LIMIT, type Env } from "./bot.js";
 import type { DaySchedule } from "./loe.js";
 import { formatDuration, kyivMinutes, toMinutes } from "./schedule.js";
-import { allSubscribers, getLatest, removeSubscriber } from "./store.js";
+import { allSubscribers, CITIES, getLatest, removeSubscriber, type City } from "./store.js";
 
 // How long before an outage subscribers get a heads-up.
 export const LEAD_MINUTES = 15;
@@ -54,16 +54,16 @@ export function outages(days: DaySchedule[]): Outage[] {
   return result;
 }
 
-export function renderReminder(o: Outage, now: number): string {
+export function renderReminder(o: Outage, now: number, city: City = "lviv"): string {
   return [
-    `⏰ Через ${o.start - now} хв вимкнуть світло — група <b>${o.group}</b>`,
+    `⏰ Через ${o.start - now} хв вимкнуть світло — ${groupWord(city)} <b>${o.group}</b>`,
     `🔴 ${clock(o.start)}–${clock(o.end)} (${formatDuration(o.end - o.start)})`,
   ].join("\n");
 }
 
-export function renderPowerOn(o: Outage, next: Outage | undefined): string {
+export function renderPowerOn(o: Outage, next: Outage | undefined, city: City = "lviv"): string {
   return [
-    `💡 За графіком світло вже є — група <b>${o.group}</b>`,
+    `💡 За графіком світло вже є — ${groupWord(city)} <b>${o.group}</b>`,
     `Відключення ${clock(o.start)}–${clock(o.end)} закінчилося.`,
     next
       ? `Наступне: 🔴 ${clock(next.start)}–${clock(next.end)} (${formatDuration(next.end - next.start)})`
@@ -95,31 +95,35 @@ export async function runReminders(env: Env, { now = new Date() } = {}): Promise
   // Outages already under way get no reminder.
   const from = Math.max(stored ? Number(stored) : until - 1, nowMin);
 
-  const all = outages((await getLatest(env.DB))?.days ?? []);
-  const messages: { group: string; text: string }[] = [];
-  for (const o of all.filter((o) => o.start > from && o.start <= until)) {
-    messages.push({ group: o.group, text: renderReminder(o, nowMin) });
-  }
-
   const sentState = await getState(env, "power_on_sent");
   const sentEnds: string[] = JSON.parse(sentState ?? "[]");
-  const ended = all.filter((o) => o.end <= nowMin && o.end > nowMin - POWER_ON_CATCH_UP && !sentEnds.includes(`${o.group}@${o.end}`));
-  // The very first run only takes note of outages that already ended.
-  for (const o of sentState === null ? [] : ended) {
-    const next = all.find((n) => n.group === o.group && n.start > o.end);
-    messages.push({ group: o.group, text: renderPowerOn(o, next) });
+  const keepEnds = [...sentEnds];
+  const messages: { city: City; group: string; text: string }[] = [];
+  for (const city of CITIES) {
+    const all = outages((await getLatest(env.DB, city))?.days ?? []);
+    for (const o of all.filter((o) => o.start > from && o.start <= until)) {
+      messages.push({ city, group: o.group, text: renderReminder(o, nowMin, city) });
+    }
+    // Lviv keys have no prefix, as before Kyiv was added.
+    const key = (o: Outage) => `${city === "lviv" ? "" : `${city}:`}${o.group}@${o.end}`;
+    const ended = all.filter((o) => o.end <= nowMin && o.end > nowMin - POWER_ON_CATCH_UP && !sentEnds.includes(key(o)));
+    // The very first run only takes note of outages that already ended.
+    for (const o of sentState === null ? [] : ended) {
+      const next = all.find((n) => n.group === o.group && n.start > o.end);
+      messages.push({ city, group: o.group, text: renderPowerOn(o, next, city) });
+    }
+    keepEnds.push(...ended.map(key));
   }
-  const keepEnds = [...sentEnds, ...ended.map((o) => `${o.group}@${o.end}`)]
-    .filter((k) => Number(k.split("@")[1]) > nowMin - 1440);
+  const fresh = keepEnds.filter((k) => Number(k.split("@")[1]) > nowMin - 1440);
 
-  const writes = [setState(env, "reminded_until", String(until)), setState(env, "power_on_sent", JSON.stringify(keepEnds))];
+  const writes = [setState(env, "reminded_until", String(until)), setState(env, "power_on_sent", JSON.stringify(fresh))];
   let sent = 0;
   let skipped = 0;
   if (messages.length) {
     const subs = await allSubscribers(env.DB);
     const gone = new Set<string>();
     for (const m of messages) {
-      for (const sub of subs.filter((s) => s.group === m.group && !gone.has(s.chatId))) {
+      for (const sub of subs.filter((s) => s.city === m.city && s.group === m.group && !gone.has(s.chatId))) {
         if (sent >= SEND_LIMIT) {
           skipped++;
           continue;

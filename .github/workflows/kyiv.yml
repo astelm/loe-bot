@@ -1,0 +1,40 @@
+name: Kyiv (DTEK)
+
+# DTEK's site blocks Cloudflare, so GitHub reads it and posts the data to the bot.
+on:
+  schedule:
+    - cron: "*/10 * * * *" # outage schedule
+    - cron: "17 1 * * *"   # house -> group list, nightly
+  workflow_dispatch:
+    inputs:
+      job:
+        type: choice
+        options: [schedule, streets]
+        default: schedule
+
+env:
+  WORKER_URL: https://loe-bot.a-stelmakh3.workers.dev
+  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+jobs:
+  schedule:
+    if: github.event.schedule == '*/10 * * * *' || inputs.job == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: kyiv-schedule
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/dtek.py schedule
+
+  streets:
+    if: github.event.schedule == '17 1 * * *' || inputs.job == 'streets'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    concurrency:
+      group: kyiv-streets
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/dtek.py streets

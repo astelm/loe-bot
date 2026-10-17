@@ -30,7 +30,7 @@ async function setup() {
   fakeTelegram();
   await handleUpdate(e, press(1, "group:1.1"), { fetchFn: async () => days });
   await handleUpdate(e, press(2, "group:3.1"), { fetchFn: async () => days });
-  await saveLatest(e.DB, { at: Date.now(), days }).run();
+  await saveLatest(e.DB, "lviv", { at: Date.now(), days }).run();
   return e;
 }
 
@@ -72,7 +72,7 @@ test("a skipped minute is caught up, an outage already started is not", async ()
 
 test("power-on message at the end, with the next outage", async () => {
   const e = await setup();
-  await saveLatest(e.DB, { at: Date.now(), days: [day("17.10.2026", { "1.1": [{ from: "20:00", to: "22:00" }, { from: "23:00", to: "24:00" }] })] }).run();
+  await saveLatest(e.DB, "lviv", { at: Date.now(), days: [day("17.10.2026", { "1.1": [{ from: "20:00", to: "22:00" }, { from: "23:00", to: "24:00" }] })] }).run();
   fakeTelegram();
   await runReminders(e, { now: kyiv("21:59") });
   let calls = fakeTelegram();
@@ -89,7 +89,7 @@ test("power-on message at the end, with the next outage", async () => {
 test("power-on follows an updated end time", async () => {
   const e = await setup();
   const extended = [day("17.10.2026", { "1.1": [{ from: "20:00", to: "23:00" }] })];
-  await saveLatest(e.DB, { at: Date.now(), days: extended }).run();
+  await saveLatest(e.DB, "lviv", { at: Date.now(), days: extended }).run();
   let calls = fakeTelegram();
   await runReminders(e, { now: kyiv("22:00") }); // old end: nothing
   assert.equal(calls.length, 0);
@@ -101,7 +101,7 @@ test("power-on follows an updated end time", async () => {
   const e2 = await setup();
   fakeTelegram();
   await runReminders(e2, { now: kyiv("21:05") });
-  await saveLatest(e2.DB, { at: Date.now(), days: [day("17.10.2026", { "1.1": [{ from: "20:00", to: "21:00" }] })] }).run();
+  await saveLatest(e2.DB, "lviv", { at: Date.now(), days: [day("17.10.2026", { "1.1": [{ from: "20:00", to: "21:00" }] })] }).run();
   calls = fakeTelegram();
   await runReminders(e2, { now: kyiv("21:06") });
   assert.equal(calls.length, 1);

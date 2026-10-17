@@ -7,20 +7,26 @@ import { day, env, fakeTelegram, message, press } from "./helpers.js";
 const today = day("17.10.2026", { "1.1": [{ from: "20:00", to: "22:00" }], "2.1": [] });
 const fetchFn = async () => [today];
 
-test("/start shows group buttons", async () => {
-  const calls = fakeTelegram();
-  await handleUpdate(env(), message(1, "/start"), { fetchFn });
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].reply_markup.inline_keyboard.flat().length, 12);
+test("/start asks for the city, Lviv then shows group buttons", async () => {
+  const e = env();
+  let calls = fakeTelegram();
+  await handleUpdate(e, message(1, "/start"), { fetchFn });
+  assert.deepEqual(calls[0].reply_markup.inline_keyboard[0].map((b: any) => b.callback_data), ["city:lviv", "city:kyiv"]);
+  calls = fakeTelegram();
+  await handleUpdate(e, press(1, "city:lviv"), { fetchFn });
+  assert.equal(calls.at(-1)!.reply_markup.inline_keyboard.flat().length, 12);
 });
 
 test("picking a group subscribes and shows the schedule without an alert later", async () => {
   const e = env();
   let calls = fakeTelegram();
   await handleUpdate(e, press(1, "group:1.1"), { fetchFn });
-  assert.deepEqual((await getSubscriber(e.DB, "1"))?.lastSent, { "17.10.2026": today.groups["1.1"] });
-  assert.deepEqual(calls.map((c) => c.method), ["answerCallbackQuery", "editMessageText", "sendMessage"]);
-  assert.match(calls[2].text, /20:00–22:00/);
+  const sub = await getSubscriber(e.DB, "1");
+  assert.equal(sub?.city, "lviv");
+  assert.deepEqual(sub?.lastSent, { "17.10.2026": today.groups["1.1"] });
+  const texts = calls.filter((c) => c.method === "sendMessage").map((c) => c.text);
+  assert.match(texts[0], /Групу <b>1.1<\/b> збережено/);
+  assert.match(texts[1], /20:00–22:00/);
 
   calls = fakeTelegram();
   assert.match(await runPoll(e, { fetchFn }), /sent 0/);
@@ -46,11 +52,11 @@ test("poll sends new days and changes, once", async () => {
   assert.equal(calls.length, 0);
 });
 
-test("/now needs a group, then answers", async () => {
+test("/now needs a city, then answers", async () => {
   const e = env();
   let calls = fakeTelegram();
   await handleUpdate(e, message(1, "/now"), { fetchFn });
-  assert.match(calls[0].text, /Спершу обери групу/);
+  assert.match(calls[0].text, /Спершу обери місто/);
   await handleUpdate(e, press(1, "group:2.1"), { fetchFn });
   calls = fakeTelegram();
   await handleUpdate(e, message(1, "/now@loe_bot"), { fetchFn });

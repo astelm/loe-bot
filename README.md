@@ -1,8 +1,12 @@
 # LOE outage bot
 
-A Telegram bot that watches the Lvivoblenergo outage schedule (the JSON feed behind
-[poweron.loe.lviv.ua](https://poweron.loe.lviv.ua/)) every 10 minutes and messages each
+A Telegram bot that watches power outage schedules every 10 minutes and messages each
 subscriber about **their group**:
+
+- **Lviv**: Lvivoblenergo (the JSON feed behind [poweron.loe.lviv.ua](https://poweron.loe.lviv.ua/)), group picked from buttons.
+- **Kyiv**: DTEK ([dtek-kem.com.ua](https://www.dtek-kem.com.ua/ua/shutdowns)), queue found by street and house number.
+
+Messages:
 
 - 🆕 a new day's schedule (e.g. tomorrow's is published)
 - ⚠️ a change: what was added or cancelled, hours without power before → after, and the difference
@@ -13,7 +17,8 @@ It runs on Cloudflare Workers' free plan, so commands are answered instantly.
 
 ## Bot commands
 
-- `/start`, `/group` pick a group (1.1 … 6.2) from buttons.
+- `/start`, `/city` pick the city.
+- `/group` picks another group (Lviv) or address (Kyiv).
 - `/now` shows the current schedule for your group.
 - `/stop` unsubscribes you.
 
@@ -30,11 +35,18 @@ It runs on Cloudflare Workers' free plan, so commands are answered instantly.
   The same run sends 💡 when an outage ends. It's remembered per group and end time, so if LOE
   extends or shortens an outage the message goes out at the new end (up to an hour late if the
   shorter schedule is published after the fact).
+- Kyiv: DTEK's site blocks Cloudflare, so GitHub Actions reads it (`.github/workflows/kyiv.yml`,
+  `scripts/dtek.py`) and posts to the worker: the schedule every 10 minutes (`/kyiv/schedule`), and
+  every street's house → queue list nightly (`/kyiv/streets`), so address lookup in the bot is
+  instant. Both endpoints need the same secret as `/setup`. GitHub's scheduled jobs can start a few
+  minutes late, and GitHub pauses them in a public repo after 60 days without commits (re-enable
+  under **Actions**).
 - Subscribers, what each was last told, and the latest schedule are kept in a Cloudflare D1 database.
 - The feed is unofficial. If LOE changes the wording or the API shape, adjust `parseSchedule` in `src/loe.ts`.
 
 Layout:
 
+- `src/dtek.ts` Kyiv: DTEK schedule format, street and house search
 - `src/loe.ts` fetches and parses ("Група 1.1. Електроенергії немає з 20:00 до 22:00.")
 - `src/schedule.ts` durations and diffing
 - `src/store.ts` D1 storage
@@ -56,6 +68,9 @@ GitHub Actions only runs tests and deploys when the code changes.
    - `CLOUDFLARE_API_TOKEN`: the token from step 2
    - `CLOUDFLARE_ACCOUNT_ID`: the id from step 3
 5. Run **Actions → Deploy bot → Run workflow**. Every push to `main` deploys again.
+6. Set `WORKER_URL` in `.github/workflows/kyiv.yml` to the worker's address from the deploy log,
+   then run **Actions → Kyiv (DTEK) → Run workflow** with `streets` once to load Kyiv addresses.
+   The repo should be public: the Kyiv job runs every 10 minutes, more than a private repo's free minutes.
 
 ## Development
 

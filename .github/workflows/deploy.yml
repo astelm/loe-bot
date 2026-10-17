@@ -1,0 +1,69 @@
+name: Deploy bot
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  # Puts the bot on Cloudflare Workers, where it answers Telegram instantly.
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Create the database if needed
+        run: |
+          id=$(npx wrangler d1 list --json | jq -r '.[] | select(.name == "loe-bot") | (.uuid // .id)')
+          if [ -z "$id" ]; then
+            npx wrangler d1 create loe-bot --location eeur --no-update-config
+            id=$(npx wrangler d1 list --json | jq -r '.[] | select(.name == "loe-bot") | (.uuid // .id)')
+          fi
+          sed -i "s/REPLACED_BY_DEPLOY_WORKFLOW/$id/" wrangler.toml
+
+      - name: Deploy
+        id: deploy
+        run: |
+          npx wrangler deploy | tee deploy.log
+          echo "url=$(grep -o 'https://[^ ]*workers\.dev' deploy.log | head -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Set secrets and connect Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          test -n "$URL" || { echo "No workers.dev URL in deploy output"; exit 1; }
+          # Webhook secret derived from the bot token, so there's nothing extra to store.
+          WEBHOOK_SECRET=$(printf '%s:webhook' "$TELEGRAM_BOT_TOKEN" | sha256sum | cut -c1-48)
+          jq -n --arg t "$TELEGRAM_BOT_TOKEN" --arg w "$WEBHOOK_SECRET" \
+            '{TELEGRAM_BOT_TOKEN: $t, WEBHOOK_SECRET: $w}' | npx wrangler secret bulk
+          sleep 5  # let the new secrets reach the edge
+          curl -fsS --retry 5 --retry-all-errors --retry-delay 5 -X POST "$URL/setup" \
+            -H "Authorization: Bearer $WEBHOOK_SECRET"

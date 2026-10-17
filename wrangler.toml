@@ -1,0 +1,16 @@
+name = "loe-bot"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+[triggers]
+# Check the LOE schedule every 10 minutes.
+crons = ["*/10 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "loe-bot"
+database_id = "REPLACED_BY_DEPLOY_WORKFLOW"
+
+[observability]
+enabled = true

@@ -1,0 +1,29 @@
+name: Debug Lviv
+on:
+  push:
+    branches: [debug-lviv]
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Database (no chat ids)
+        run: |
+          id=$(npx wrangler d1 list --json | jq -r '.[] | select(.name == "loe-bot") | (.uuid // .id)')
+          sed -i "s/REPLACED_BY_DEPLOY_WORKFLOW/$id/" wrangler.toml
+          q() { npx wrangler d1 execute loe-bot --remote --json --command "$1" | jq -c '.[0].results'; }
+          q "PRAGMA table_info(subscribers)"
+          q "SELECT city, grp, count(*) n, max(length(last_sent)) ls FROM subscribers GROUP BY city, grp"
+          q "SELECT key, length(value) len, substr(value, 1, 400) v FROM state"
+          q "SELECT count(*) FROM kyiv_streets"
+      - name: LOE API from GitHub
+        run: curl -sS -m 30 -o loe.json -w 'status %{http_code}\n' 'https://api.loe.lviv.ua/api/menus?page=1&type=photo-grafic' -H 'Accept: application/json'; head -c 600 loe.json; echo
+      - name: Worker logs for 2 minutes
+        run: timeout 130 npx wrangler tail loe-bot --format pretty 2>&1 | sed -E 's/[0-9]{6,}/<id>/g' | grep -v -E '^\s*$' | head -80 || true

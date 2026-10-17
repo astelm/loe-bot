@@ -33,8 +33,11 @@ class Dtek:
         start = self.html.index(f"DisconSchedule.{name} = ") + len(f"DisconSchedule.{name} = ")
         return json.JSONDecoder().raw_decode(self.html[start:])[0]
 
-    def street(self, name):
-        form = urllib.parse.urlencode({"method": "getHomeNum", "data[0][name]": "street", "data[0][value]": name}).encode()
+    def street(self, name, update_fact=None):
+        fields = {"method": "getHomeNum", "data[0][name]": "street", "data[0][value]": name}
+        if update_fact:  # the schedule version we have; the answer carries a newer `fact` if there is one
+            fields.update({"data[1][name]": "updateFact", "data[1][value]": update_fact})
+        form = urllib.parse.urlencode(fields).encode()
         body = json.loads(self._open(f"{SITE}/ua/ajax", form, {
             "X-Requested-With": "XMLHttpRequest",
             "X-CSRF-Token": self.csrf,
@@ -64,9 +67,15 @@ def post(path, payload):
 def schedule():
     dtek = Dtek()
     streets = dtek.page_value("streets")
-    # getHomeNum answers with a fresher schedule than the page itself.
-    body = dtek.street("вул. Хрещатик" if "вул. Хрещатик" in streets else streets[0])
-    print(post("/kyiv/schedule", {"fact": body["fact"], "updateTimestamp": body.get("updateTimestamp")}))
+    fact = dtek.page_value("fact")
+    # The page can be cached; getHomeNum answers with the newer schedule when there is one.
+    body = dtek.street("вул. Хрещатик" if "вул. Хрещатик" in streets else streets[0], fact.get("update") or "01.01.2000 00:00")
+    if body.get("fact", {}).get("data"):
+        fact, updated = body["fact"], body.get("updateTimestamp")
+    else:
+        updated = fact.get("update")
+    print(f"schedule as of {updated}: {list(fact['data'])}")
+    print(post("/kyiv/schedule", {"fact": fact, "updateTimestamp": updated}))
 
 
 def streets():

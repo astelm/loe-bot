@@ -14,18 +14,10 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - name: LOE API from GitHub
+      - name: Lviv state and a poll run
         run: |
-          curl -sS -m 30 -o loe.json -w 'status %{http_code}\n' 'https://api.loe.lviv.ua/api/menus?page=1&type=photo-grafic' -H 'Accept: application/json' || true
-          jq -r '."hydra:member"[].menuItems[] | "=== \(.name) | raw=\(.rawHtml|length) mobile=\(.rawMobileHtml|length)\n\(.rawHtml)\n--- mobile\n\(.rawMobileHtml)"' loe.json | head -c 12000
-      - name: LOE API from a Cloudflare Worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          cd probe
-          npx -y wrangler@4 deploy | tee deploy.log
-          url=$(grep -o 'https://[^ ]*workers\.dev' deploy.log | head -1)
-          sleep 5
-          curl -sS --retry 3 --retry-all-errors "$url" | jq . | head -c 6000; echo
-          npx -y wrangler@4 delete --force || true
+          id=$(npx wrangler d1 list --json | jq -r '.[] | select(.name == "loe-bot") | (.uuid // .id)')
+          sed -i "s/REPLACED_BY_DEPLOY_WORKFLOW/$id/" wrangler.toml
+          npx wrangler d1 execute loe-bot --remote --json --command "SELECT key, substr(value, 1, 300) v FROM state WHERE key = 'latest'" | jq -c '.[0].results'
+          timeout 660 npx wrangler tail loe-bot --format json 2>/dev/null | jq -c --unbuffered 'select(.event.cron == "*/10 * * * *") | {cron: .event.cron, outcome, logs: [.logs[].message], ex: .exceptions, cpu: .cpuTime, wall: .wallTime}' | head -1 || true
+          npx wrangler d1 execute loe-bot --remote --json --command "SELECT key, substr(value, 1, 300) v FROM state WHERE key = 'latest'" | jq -c '.[0].results'

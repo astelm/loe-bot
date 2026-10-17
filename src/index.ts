@@ -1,5 +1,9 @@
 import { handleUpdate, runPoll, telegram, type Env, type Update } from "./bot.js";
+import { runReminders } from "./reminders.js";
 import { SCHEMA } from "./store.js";
+
+// Must match the first cron in wrangler.toml.
+export const POLL_CRON = "*/10 * * * *";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -43,8 +47,13 @@ export default {
     return new Response("loe-bot is running");
   },
 
-  // Every 10 minutes (wrangler.toml): check the LOE schedule and send changes.
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(runPoll(env).then((r) => console.log(`poll: ${r}`)));
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (event.cron === POLL_CRON) {
+      // Every 10 minutes: check the LOE schedule and send changes.
+      ctx.waitUntil(runPoll(env).then((r) => console.log(`poll: ${r}`)));
+    } else {
+      // Every minute: remind about outages starting soon.
+      ctx.waitUntil(runReminders(env).then((r) => console.log(`reminders: ${r}`)));
+    }
   },
 } satisfies ExportedHandler<Env>;

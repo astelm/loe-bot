@@ -4,8 +4,9 @@ compatibility_date = "2026-09-01"
 workers_dev = true
 
 [triggers]
-# Check the LOE schedule every 10 minutes.
-crons = ["*/10 * * * *"]
+# Every 10 minutes: check the LOE schedule (POLL_CRON in src/index.ts).
+# Every minute: remind subscribers 15 minutes before an outage.
+crons = ["*/10 * * * *", "* * * * *"]
 
 [[d1_databases]]
 binding = "DB"

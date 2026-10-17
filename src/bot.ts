@@ -37,7 +37,7 @@ export async function telegram(env: Env, method: string, params: object = {}): P
   return data.result;
 }
 
-const send = (env: Env, chatId: string, text: string, extra: object = {}) =>
+export const send = (env: Env, chatId: string, text: string, extra: object = {}) =>
   telegram(env, "sendMessage", { chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true, ...extra });
 
 interface Chat { id: number }

@@ -6,6 +6,7 @@ subscriber about **their group**:
 
 - 🆕 a new day's schedule (e.g. tomorrow's is published)
 - ⚠️ a change: what was added or cancelled, hours without power before → after, and the difference
+- ⏰ a reminder 15 minutes before each outage
 
 It runs on Cloudflare Workers' free plan, so commands are answered instantly.
 
@@ -22,6 +23,9 @@ It runs on Cloudflare Workers' free plan, so commands are answered instantly.
   subscriber, compares their group's outages with what they were last told. New days and
   changes are sent, up to 45 messages per run (`SEND_LIMIT` in `src/bot.ts`, to stay within
   the free plan's limits); the rest go out on the next run.
+- Another schedule runs every minute and reminds subscribers 15 minutes before an outage in their
+  group (`LEAD_MINUTES` in `src/reminders.ts`). Back-to-back intervals, also across midnight, count
+  as one outage. If a run is missed, the next one catches up; outages already under way get no reminder.
 - Subscribers, what each was last told, and the latest schedule are kept in a Cloudflare D1 database.
 - The feed is unofficial. If LOE changes the wording or the API shape, adjust `parseSchedule` in `src/loe.ts`.
 
@@ -31,6 +35,7 @@ Layout:
 - `src/schedule.ts` durations and diffing
 - `src/store.ts` D1 storage
 - `src/bot.ts` commands, messages and the poll
+- `src/reminders.ts` reminders before outages
 - `src/index.ts` the worker: webhook, `/setup`, schedule
 
 GitHub Actions only runs tests and deploys when the code changes.

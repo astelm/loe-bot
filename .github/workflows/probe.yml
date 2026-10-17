@@ -17,6 +17,8 @@ jobs:
           wc -c page.html; grep -c 'DisconSchedule.fact' page.html || true; grep -ci incapsula page.html || true
           grep -o 'DisconSchedule\.fact = .\{0,800\}' page.html | head -c 900 || true
           grep -o 'DisconSchedule\.[a-zA-Z]* = ' page.html | sort | uniq -c || true
+      - name: DTEK structure and address lookup from the runner
+        run: python3 probe/dtek.py || true
       - uses: actions/upload-artifact@v4
         with:
           name: page

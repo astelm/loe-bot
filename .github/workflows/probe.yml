@@ -1,0 +1,27 @@
+name: Probe DTEK
+on:
+  push:
+    branches: [probe-dtek]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: From the GitHub runner, plain curl
+        run: |
+          curl -sS -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36" \
+            -H "Accept-Language: uk-UA" -o page.html -w 'status %{http_code}\n' https://www.dtek-kem.com.ua/ua/shutdowns || true
+          wc -c page.html; grep -c 'DisconSchedule.fact' page.html || true; grep -ci incapsula page.html || true
+          grep -o 'DisconSchedule\.fact = .\{0,800\}' page.html | head -c 900 || true
+          grep -o 'DisconSchedule\.[a-zA-Z]* = ' page.html | sort | uniq -c || true
+      - name: From a Cloudflare Worker
+        run: |
+          cd probe
+          npx -y wrangler@4 deploy worker.js --name loe-bot-probe --compatibility-date 2026-09-01 | tee deploy.log
+          url=$(grep -o 'https://[^ ]*workers\.dev' deploy.log | head -1)
+          sleep 5
+          curl -sS --retry 3 --retry-all-errors "$url" | head -c 4000; echo
+          npx -y wrangler@4 delete --name loe-bot-probe --force || true

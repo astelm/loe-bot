@@ -24,6 +24,9 @@ jobs:
           q "SELECT key, length(value) len, substr(value, 1, 400) v FROM state"
           q "SELECT count(*) FROM kyiv_streets"
       - name: LOE API from GitHub
-        run: curl -sS -m 30 -o loe.json -w 'status %{http_code}\n' 'https://api.loe.lviv.ua/api/menus?page=1&type=photo-grafic' -H 'Accept: application/json'; head -c 600 loe.json; echo
+        run: |
+          curl -sS -m 30 -o loe.json -w 'status %{http_code}\n' 'https://api.loe.lviv.ua/api/menus?page=1&type=photo-grafic' -H 'Accept: application/json' || true
+          head -c 600 loe.json; echo
       - name: Worker logs for 2 minutes
-        run: timeout 130 npx wrangler tail loe-bot --format pretty 2>&1 | sed -E 's/[0-9]{6,}/<id>/g' | grep -v -E '^\s*$' | head -80 || true
+        run: |
+          timeout 130 npx wrangler tail loe-bot --format pretty 2>&1 | sed -E 's/[0-9]{6,}/<id>/g' | grep -v -E '^\s*$' | head -80 || true

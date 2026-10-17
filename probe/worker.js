@@ -14,9 +14,26 @@ export default {
     const q = u.searchParams.get("q");
     if (q) return Response.json(await get(q));
     const out = {};
-    out.planned = await get(`${B}/regions/25/dsos/902/planned-outages`);
-    out.regions = await get(`${B}/addresses/v2/regions`);
-    out.streets = await get(`${B}/addresses/v2/streets?regionId=25&query=${encodeURIComponent("Хрещатик")}&dsoId=902`);
+    const A = `${B}/addresses/v2`;
+    const r = await fetch(`${B}/regions/25/dsos/902/planned-outages`, { headers: H });
+    const planned = await r.json();
+    out.groups = Object.keys(planned);
+    out.statuses = [...new Set(Object.values(planned).flatMap((g) => [g.today?.status, g.tomorrow?.status]))];
+    out.types = [...new Set(Object.values(planned).flatMap((g) => [...(g.today?.slots ?? []), ...(g.tomorrow?.slots ?? [])].map((s) => s.type)))];
+    out.extraKeys = [...new Set(Object.values(planned).flatMap((g) => Object.keys(g)))];
+    for (const [k, url] of Object.entries({
+      houses1: `${A}/houses?regionId=25&streetId=952&query=27&dsoId=902`,
+      houses2: `${A}/houses?regionId=25&streetId=952&dsoId=902`,
+      streets2: `${A}/streets?regionId=25&query=${encodeURIComponent("Курбаса")}&dsoId=902`,
+    })) out[k] = await get(url);
+    let houseId = null;
+    try { houseId = JSON.parse(out.houses1.body)[0]?.id; } catch {}
+    out.houseId = houseId;
+    for (const [k, url] of Object.entries({
+      group1: `${A}/group?regionId=25&streetId=952&houseId=${houseId}&dsoId=902`,
+      group2: `${A}/groups?regionId=25&streetId=952&houseId=${houseId}&dsoId=902`,
+      group3: `${B}/addresses/v2/group?regionId=25&dsoId=902&streetId=952&houseId=${houseId}`,
+    })) out[k] = await get(url);
     return Response.json(out);
   },
 };

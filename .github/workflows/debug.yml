@@ -10,13 +10,6 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
-      - name: Yasno endpoints in its web app
-        run: bash probe/find.sh
-      - name: Yasno from GitHub
-        run: |
-          B=https://app.yasno.ua/api/blackout-service/public/shutdowns
-          curl -sS -m 30 "$B/regions/25/dsos/902/planned-outages" | head -c 1500; echo
-          curl -sS -m 30 "$B/addresses/v2/regions" | head -c 800; echo
       - name: Yasno from a Cloudflare Worker
         run: |
           cd probe

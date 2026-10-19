@@ -1,5 +1,5 @@
 import { fetchSchedules, GROUPS, toSortable, type DaySchedule, type Interval } from "./loe.js";
-import { diff, fmtInterval, formatDuration, formatList, sameIntervals, totalMinutes } from "./schedule.js";
+import { diff, fmtInterval, formatDuration, formatList, kyivMinutes, sameIntervals, totalMinutes } from "./schedule.js";
 import {
   allSubscribers, getLatest, getPending, getSubscriber, removeSubscriber, saveLatest, saveSubscriber, setPending,
   type City, type Pending, type Subscriber,
@@ -92,13 +92,22 @@ function renderDay(day: DaySchedule, group: string, city: City): string {
   ].filter(Boolean).join("\n");
 }
 
-export function renderAll(days: DaySchedule[], group: string, city: City = "lviv"): string {
-  if (days.length === 0) {
-    return city === "kyiv"
-      ? "Графіка відключень у Yasno зараз немає. Перевіряю кожні 10 хвилин і напишу, щойно він з'явиться."
-      : "Не вдалося отримати графік. Спробую ще раз за кілька хвилин.";
-  }
+export const NO_OUTAGES_TODAY = "Сьогодні вимкнень електроенергії не заплановано";
+
+/** "DD.MM.YYYY" in Kyiv at the given moment. */
+export function kyivDate(now: number): string {
+  const d = new Date(kyivMinutes(new Date(now)) * 60_000);
+  return `${String(d.getUTCDate()).padStart(2, "0")}.${String(d.getUTCMonth() + 1).padStart(2, "0")}.${d.getUTCFullYear()}`;
+}
+
+/** Today's and later schedules for the group. Without one for today, says there are no outages today. */
+export function renderAll(days: DaySchedule[], group: string, city: City, now: number): string {
+  const today = toSortable(kyivDate(now));
+  const hasToday = days.some((d) => toSortable(d.date) === today && d.groups[group]);
+  // Older days are gone; so is today if this group isn't in its schedule.
+  days = days.filter((d) => toSortable(d.date) > today || (hasToday && toSortable(d.date) === today));
   const parts = days.map((d) => renderDay(d, group, city));
+  if (!hasToday) parts.unshift(NO_OUTAGES_TODAY);
   if (days.length > 1) {
     const sum = days.reduce((s, d) => s + totalMinutes(d.groups[group] ?? []), 0);
     parts.push(`📊 Разом за ${days.length} дн.: <b>${formatDuration(sum)}</b> без світла`);
@@ -152,7 +161,7 @@ async function subscribe(ctx: Ctx, city: City, group: string, address: string | 
   ]);
   const what = address ? `${escape(address)} — ${groupWord(city)} <b>${group}</b>` : `Групу <b>${group}</b>`;
   await send(ctx.env, ctx.chatId, `✅ ${what} збережено. Повідомлю, щойно графік зміниться, і нагадаю перед відключенням.`);
-  await send(ctx.env, ctx.chatId, renderAll(days, group, city));
+  await send(ctx.env, ctx.chatId, renderAll(days, group, city, ctx.now));
 }
 
 async function askStreet(ctx: Ctx, text = "Напиши назву вулиці в Києві, наприклад: <i>Хрещатик</i>") {
@@ -259,7 +268,7 @@ export async function handleUpdate(
   } else if (command === "/now") {
     if (!sub) return void (await send(env, ctx.chatId, "Спершу обери місто: /city"));
     const where = sub.address ? `📍 ${escape(sub.address)}\n\n` : "";
-    await send(env, ctx.chatId, where + renderAll(await currentSchedules(ctx, sub.city), sub.group, sub.city));
+    await send(env, ctx.chatId, where + renderAll(await currentSchedules(ctx, sub.city), sub.group, sub.city, ctx.now));
   } else if (command === "/stop") {
     await env.DB.batch([removeSubscriber(env.DB, ctx.chatId), setPending(env.DB, ctx.chatId, null)]);
     await send(env, ctx.chatId, "Сповіщення вимкнено. /start — щоб увімкнути знову.");

@@ -18,7 +18,7 @@ export type FetchSchedules = () => Promise<DaySchedule[]>;
 // Messages over this limit are sent on the next run.
 export const SEND_LIMIT = 45;
 // Commands reuse schedules fetched this recently instead of asking LOE or Yasno again.
-const FRESH_MS = 10 * 60_000;
+const FRESH_MS = 2 * 60_000;
 // Most street or house buttons shown at once.
 const MAX_OPTIONS = 8;
 
@@ -338,7 +338,7 @@ export async function notifyChanges(env: Env, city: City, days: DaySchedule[], n
   return `${city} ${dates}: sent ${sent}` + (postponed ? `, ${postponed} left for the next run` : "");
 }
 
-/** Called every 10 minutes for each city: fetches its schedule and sends changes. */
+/** Called every 2 minutes for each city: fetches its schedule and sends changes. */
 export async function runPoll(
   env: Env,
   { city = "lviv" as City, now = Date.now(), fetchFn = fetchSchedules as FetchSchedules, yasno = liveYasno } = {},

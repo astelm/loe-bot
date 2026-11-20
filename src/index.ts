@@ -4,8 +4,8 @@ import { MIGRATIONS, SCHEMA } from "./store.js";
 
 // Must match the first two crons in wrangler.toml. Separate runs, so each city
 // gets its own budget of outgoing requests.
-export const POLL_CRON = "*/10 * * * *";
-export const KYIV_CRON = "5-59/10 * * * *";
+export const POLL_CRON = "*/2 * * * *";
+export const KYIV_CRON = "1-59/2 * * * *";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -55,10 +55,10 @@ export default {
 
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (event.cron === POLL_CRON) {
-      // Every 10 minutes: check the Lviv schedule and send changes.
+      // Every 2 minutes: check the Lviv schedule and send changes.
       ctx.waitUntil(runPoll(env).then((r) => console.log(`poll: ${r}`)));
     } else if (event.cron === KYIV_CRON) {
-      // The same for Kyiv, five minutes later.
+      // The same for Kyiv, a minute later.
       ctx.waitUntil(runPoll(env, { city: "kyiv" }).then((r) => console.log(`poll: ${r}`)));
     } else {
       // Every minute: remind about outages starting soon.

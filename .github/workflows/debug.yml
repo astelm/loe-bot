@@ -14,6 +14,7 @@ jobs:
           for i in $(seq 1 10); do
             npx -y wrangler@4 d1 execute loe-bot --remote --json \
               --command "SELECT key, substr(value, 1, 120) AS v FROM state WHERE key IN ('latest', 'latest:kyiv')" \
-              | jq -c '[now|todate, (.[0].results[] | [.key, .v])]'
+              > out.json || true
+            date -u +%T; grep -o '"key": *"[^"]*"\|"v": *"{\\"at\\":[0-9]*' out.json | tr -d '\\' | paste -sd' ' || cat out.json
             sleep 12
           done

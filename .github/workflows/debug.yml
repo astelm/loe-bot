@@ -11,5 +11,6 @@ jobs:
     steps:
       - name: Worker logs for two minutes
         run: |
+          sleep 480
           timeout 130 npx -y wrangler@4 tail loe-bot --format json > tail.json || true
           jq -c 'select(.event.cron != null or .scriptName != null) | [(.eventTimestamp/1000|todate), .event.cron, .outcome, ([.logs[]?.message[]?] | tostring | .[0:300]), ([.exceptions[]?.message] | tostring)]' tail.json || head -c 3000 tail.json

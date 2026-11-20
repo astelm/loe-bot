@@ -15,9 +15,9 @@ jobs:
           cd probe
           npx -y wrangler@4 deploy || { sleep 10; npx -y wrangler@4 deploy; }
           url=https://loe-bot-probe.a-stelmakh3.workers.dev
-          sleep 10
-          for i in $(seq 1 24); do
+          sleep 20
+          for i in $(seq 1 3); do
             curl -sS --retry 3 --retry-all-errors "$url" | jq -c .
-            sleep 10
+            sleep 20
           done
           npx -y wrangler@4 delete --force || true

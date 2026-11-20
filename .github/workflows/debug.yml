@@ -9,12 +9,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
-      - name: When each city was last checked
+      - name: Worker logs for two minutes
         run: |
-          for i in $(seq 1 10); do
-            npx -y wrangler@4 d1 execute loe-bot --remote --json \
-              --command "SELECT key, substr(value, 1, 120) AS v FROM state WHERE key IN ('latest', 'latest:kyiv')" \
-              > out.json || true
-            date -u +%T; grep -o '"key": *"[^"]*"\|"v": *"{\\"at\\":[0-9]*' out.json | tr -d '\\' | paste -sd' ' || cat out.json
-            sleep 12
-          done
+          timeout 130 npx -y wrangler@4 tail loe-bot --format json > tail.json || true
+          jq -c 'select(.event.cron != null or .scriptName != null) | [(.eventTimestamp/1000|todate), .event.cron, .outcome, ([.logs[]?.message[]?] | tostring | .[0:300]), ([.exceptions[]?.message] | tostring)]' tail.json || head -c 3000 tail.json

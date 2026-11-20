@@ -4,10 +4,10 @@ compatibility_date = "2026-09-01"
 workers_dev = true
 
 [triggers]
-# Every 2 minutes: check the LOE schedule (POLL_CRON in src/index.ts),
-# and Yasno for Kyiv a minute later (KYIV_CRON).
-# Every minute: remind subscribers 15 minutes before an outage.
-crons = ["*/2 * * * *", "1-59/2 * * * *", "* * * * *"]
+# All every minute, written differently so each is a separate run:
+# LOE for Lviv (POLL_CRON in src/index.ts) and Yasno for Kyiv (KYIV_CRON), each
+# checked twice a minute, and reminders 15 minutes before an outage.
+crons = ["*/1 * * * *", "0-59 * * * *", "* * * * *"]
 
 [[d1_databases]]
 binding = "DB"

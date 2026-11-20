@@ -1,6 +1,6 @@
 # LOE outage bot
 
-A Telegram bot that watches power outage schedules every 2 minutes and messages each
+A Telegram bot that watches power outage schedules every 30 seconds and messages each
 subscriber about **their group**:
 
 - **Lviv**: Lvivoblenergo (the JSON feed behind [poweron.loe.lviv.ua](https://poweron.loe.lviv.ua/)), group picked from buttons.
@@ -25,7 +25,7 @@ It runs on Cloudflare Workers' free plan, so commands are answered instantly.
 ## How it works
 
 - Telegram sends every message and button press to the worker (a webhook), which replies right away.
-- A Cloudflare schedule runs every 2 minutes. It fetches the LOE schedule and, for each
+- A Cloudflare schedule runs every 30 seconds (two checks per minute run). It fetches the LOE schedule and, for each
   subscriber, compares their group's outages with what they were last told. New days and
   changes are sent, up to 45 messages per run (`SEND_LIMIT` in `src/bot.ts`, to stay within
   the free plan's limits); the rest go out on the next run.
@@ -35,7 +35,7 @@ It runs on Cloudflare Workers' free plan, so commands are answered instantly.
   The same run sends 💡 when an outage ends. It's remembered per group and end time, so if LOE
   extends or shortens an outage the message goes out at the new end (up to an hour late if the
   shorter schedule is published after the fact).
-- Kyiv: the worker reads Yasno's public API (the one its site uses) a minute after the Lviv
+- Kyiv: the worker reads Yasno's public API (the one its site uses) on the same 30-second rhythm as the Lviv
   check, and looks up the street, house and queue there while the user types the address.
 - Subscribers, what each was last told, and the latest schedule are kept in a Cloudflare D1 database.
 - The feed is unofficial. If LOE changes the wording or the API shape, adjust `parseSchedule` in `src/loe.ts`.

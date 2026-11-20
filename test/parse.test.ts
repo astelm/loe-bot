@@ -42,3 +42,19 @@ test("an LOE answer without any schedule counts as a failed fetch", async () => 
     globalThis.fetch = saved;
   }
 });
+
+test("LOE: skips the cache and reads both JSON-LD and plain JSON", async () => {
+  const saved = globalThis.fetch;
+  const urls: string[] = [];
+  const items = [{ name: "Today", rawHtml: sample }];
+  try {
+    for (const body of [{ "hydra:member": [{ menuItems: items }] }, [{ menuItems: items }]]) {
+      globalThis.fetch = (async (url: string) => (urls.push(url), Response.json(body))) as typeof fetch;
+      const [d] = await fetchSchedules();
+      assert.equal(d.date, "17.10.2026");
+    }
+  } finally {
+    globalThis.fetch = saved;
+  }
+  assert.match(urls[0], /type=photo-grafic&_=\d+$/);
+});

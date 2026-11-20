@@ -24,9 +24,9 @@ interface MenuItem {
   rawMobileHtml?: string | null;
 }
 
-interface ApiResponse {
-  "hydra:member"?: { menuItems?: MenuItem[] }[];
-}
+// JSON-LD wraps the menus in "hydra:member"; plain JSON is the bare list.
+type Menu = { menuItems?: MenuItem[] };
+type ApiResponse = { "hydra:member"?: Menu[] } | Menu[];
 
 export function htmlToText(html: string): string {
   return html
@@ -71,7 +71,9 @@ function pad(t: string): string {
 
 /** Returns all day schedules currently published (usually today, sometimes tomorrow too). */
 export async function fetchSchedules(): Promise<DaySchedule[]> {
-  const res = await fetch(API_URL, {
+  // LOE's Cloudflare keeps this page cached for up to 2 hours, so a new schedule can show up
+  // late. A unique query parameter goes past the cache to LOE's own server, which has it at once.
+  const res = await fetch(`${API_URL}&_=${Date.now()}`, {
     headers: { Accept: "application/ld+json, application/json", "User-Agent": "loe-outage-telegram-bot/1.0" },
     signal: AbortSignal.timeout(20_000),
   });
@@ -79,7 +81,7 @@ export async function fetchSchedules(): Promise<DaySchedule[]> {
   const data = (await res.json()) as ApiResponse;
 
   const byDate = new Map<string, DaySchedule>();
-  for (const menu of data["hydra:member"] ?? []) {
+  for (const menu of (Array.isArray(data) ? data : data["hydra:member"]) ?? []) {
     for (const item of menu.menuItems ?? []) {
       const html = item.rawHtml || item.rawMobileHtml;
       if (!html) continue;

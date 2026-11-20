@@ -14,11 +14,11 @@ export interface Env {
 
 export type FetchSchedules = () => Promise<DaySchedule[]>;
 
-// Free Workers plan allows 50 outgoing requests per run; one goes to LOE or Yasno.
+// Free Workers plan allows 50 outgoing requests per run; two go to LOE or Yasno.
 // Messages over this limit are sent on the next run.
 export const SEND_LIMIT = 45;
 // Commands reuse schedules fetched this recently instead of asking LOE or Yasno again.
-const FRESH_MS = 2 * 60_000;
+const FRESH_MS = 30_000;
 // Most street or house buttons shown at once.
 const MAX_OPTIONS = 8;
 
@@ -293,7 +293,15 @@ function pruneLastSent(sub: Subscriber, known: Set<string>): boolean {
 
 /** Saves the new schedules for a city and tells each of its subscribers about changes for their group. */
 export async function notifyChanges(env: Env, city: City, days: DaySchedule[], now: number): Promise<string> {
-  const writes = [saveLatest(env.DB, city, { at: now, days })];
+  // Checked every 30 seconds and the schedule rarely changes: only go through the
+  // subscribers when it did, or when some messages are still owed.
+  const previous = await getLatest(env.DB, city);
+  if (previous && !previous.retry && JSON.stringify(previous.days) === JSON.stringify(days)) {
+    await saveLatest(env.DB, city, { at: now, days }).run();
+    return `${city}: unchanged`;
+  }
+  const latest = { at: now, days, retry: false };
+  const writes = [saveLatest(env.DB, city, latest)];
   const known = new Set(days.map((d) => d.date));
   let sent = 0;
   let postponed = 0;
@@ -322,6 +330,7 @@ export async function notifyChanges(env: Env, city: City, days: DaySchedule[], n
           gone = true;
           break;
         }
+        latest.retry = true; // try this one again on the next check
       }
     }
     if (gone) continue;
@@ -333,12 +342,14 @@ export async function notifyChanges(env: Env, city: City, days: DaySchedule[], n
       );
     }
   }
+  if (postponed) latest.retry = true;
+  writes[0] = saveLatest(env.DB, city, latest);
   await env.DB.batch(writes);
   const dates = days.map((d) => d.date).join(", ") || "no schedule";
   return `${city} ${dates}: sent ${sent}` + (postponed ? `, ${postponed} left for the next run` : "");
 }
 
-/** Called every 2 minutes for each city: fetches its schedule and sends changes. */
+/** Called every 30 seconds for each city: fetches its schedule and sends changes. */
 export async function runPoll(
   env: Env,
   { city = "lviv" as City, now = Date.now(), fetchFn = fetchSchedules as FetchSchedules, yasno = liveYasno } = {},

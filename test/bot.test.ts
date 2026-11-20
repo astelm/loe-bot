@@ -31,7 +31,7 @@ test("picking a group subscribes and shows the schedule without an alert later",
   assert.match(texts[1], /20:00–22:00/);
 
   calls = fakeTelegram();
-  assert.match(await runPoll(e, { fetchFn }), /sent 0/);
+  assert.match(await runPoll(e, { fetchFn }), /unchanged/);
   assert.equal(calls.length, 0);
 });
 

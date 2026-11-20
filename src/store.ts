@@ -18,6 +18,8 @@ export interface Subscriber {
 export interface Latest {
   at: number;
   days: DaySchedule[];
+  /** Some messages about these schedules are still to be sent. */
+  retry?: boolean;
 }
 
 /** Where a chat is in the Kyiv address dialog. */

@@ -1,11 +1,20 @@
 import { handleUpdate, runPoll, telegram, type Env, type Update } from "./bot.js";
 import { runReminders } from "./reminders.js";
-import { MIGRATIONS, SCHEMA } from "./store.js";
+import { MIGRATIONS, SCHEMA, type City } from "./store.js";
 
-// Must match the first two crons in wrangler.toml. Separate runs, so each city
-// gets its own budget of outgoing requests.
-export const POLL_CRON = "*/2 * * * *";
-export const KYIV_CRON = "1-59/2 * * * *";
+// Must match the crons in wrangler.toml. All three run every minute; they're
+// written differently so each is its own run with its own budget of outgoing requests.
+export const POLL_CRON = "*/1 * * * *";
+export const KYIV_CRON = "0-59 * * * *";
+// Each city is checked at the start of its minute and again this much later.
+const SECOND_CHECK_MS = 30_000;
+
+/** Two checks a minute: one now, one SECOND_CHECK_MS after the scheduled time. */
+async function pollTwice(env: Env, city: City, scheduledTime: number): Promise<void> {
+  console.log(`poll: ${await runPoll(env, { city })}`);
+  await new Promise((r) => setTimeout(r, Math.max(0, scheduledTime + SECOND_CHECK_MS - Date.now())));
+  console.log(`poll: ${await runPoll(env, { city })}`);
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -55,11 +64,11 @@ export default {
 
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (event.cron === POLL_CRON) {
-      // Every 2 minutes: check the Lviv schedule and send changes.
-      ctx.waitUntil(runPoll(env).then((r) => console.log(`poll: ${r}`)));
+      // Every 30 seconds: check the Lviv schedule and send changes.
+      ctx.waitUntil(pollTwice(env, "lviv", event.scheduledTime));
     } else if (event.cron === KYIV_CRON) {
-      // The same for Kyiv, a minute later.
-      ctx.waitUntil(runPoll(env, { city: "kyiv" }).then((r) => console.log(`poll: ${r}`)));
+      // The same for Kyiv.
+      ctx.waitUntil(pollTwice(env, "kyiv", event.scheduledTime));
     } else {
       // Every minute: remind about outages starting soon.
       ctx.waitUntil(runReminders(env).then((r) => console.log(`reminders: ${r}`)));

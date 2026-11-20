@@ -13,9 +13,9 @@ jobs:
       - name: How often LOE and Yasno change, seen from a Cloudflare Worker
         run: |
           cd probe
-          npx -y wrangler@4 deploy | tee deploy.log
-          url=$(grep -o 'https://[^ ]*workers\.dev' deploy.log | head -1)
-          sleep 5
+          npx -y wrangler@4 deploy || { sleep 10; npx -y wrangler@4 deploy; }
+          url=https://loe-bot-probe.a-stelmakh3.workers.dev
+          sleep 10
           for i in $(seq 1 24); do
             curl -sS --retry 3 --retry-all-errors "$url" | jq -c .
             sleep 10
